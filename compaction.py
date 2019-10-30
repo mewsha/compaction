@@ -111,9 +111,7 @@ def removefiles(filelist):
     numfiles = len(filelist)
     for num in range(numfiles):
         rmfile = filelist[num]
-        sleep(1)
         remove(rmfile)
-        sleep(1)
 
 
 def getfilelist(logpath, namecontains):
@@ -136,7 +134,6 @@ if __name__=="__main__":
     # compact each logfile
     for logfile in redolist:
         compact(logfile)
-        sleep(1)
 
     # remove old redo logs
     removefiles(redolist)
