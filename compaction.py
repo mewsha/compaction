@@ -131,9 +131,7 @@ def combinelogs(logpath,redologscompacted):
 
 def generateredologs(logpath):
     # generate redo logs (DEBUG)
-    # should be: db writes to redo0 always
-    # and rolls data back into the next available
-    # redo log number, so when compaction,
+    # should be: db writes to last redo file always
     # compact never touches last redo log,
     # compact only works on redo 0-max-1
     # and compacts into redo0+
@@ -169,7 +167,7 @@ def getfilelist(logpath, namecontains):
 
 
 if __name__=="__main__":
-    logpath = "./etc/bananadb/"
+    logpath = "./logs/"
 
     # Start up the server to expose the metrics.
     start_http_server(9101)
@@ -177,43 +175,43 @@ if __name__=="__main__":
     if sys.argv[0] == 'test':
         print(logpath)
     else:
-        #while True:
-        sleep(10)
-        #DEBUG: generate the redo log files
-        generateredologs(logpath)
+        while True:
+            sleep(10)
+            #DEBUG: generate the redo log files
+            #generateredologs(logpath)
 
-        # get all log files
-        redolist = getfilelist(logpath, "redo")
-        print(redolist)
+            # get all log files
+            redolist = getfilelist(logpath, "redo")
+            print(redolist)
 
-        #exclude last file from list (currently in use by database)
-        # loop through redo list
-        maxNum = 0
-        for logfile in redolist:
-            # get number at end of file, all files format "redo##.log"
-            filename = logfile.strip(".log")
-            filenum = int(filename[4:])
-            maxNum = max(filenum, maxNum)
-        # remove last file from redo list
-        excludeFile = "redo"+str(maxNum)+".log"
-        redolist.remove(excludeFile)
-        print(redolist)
+            #exclude last file from list (currently in use by database)
+            # loop through redo list
+            maxNum = 0
+            for logfile in redolist:
+                # get number at end of file, all files format "redo##.log"
+                filename = logfile.strip(".log")
+                filenum = int(filename[4:])
+                maxNum = max(filenum, maxNum)
+            # remove last file from redo list
+            excludeFile = "redo"+str(maxNum)+".log"
+            redolist.remove(excludeFile)
+            print(redolist)
 
-        # compact each logfile
-        for logfile in redolist:
-            compact(logpath, logfile)
+            # compact each logfile
+            for logfile in redolist:
+                compact(logpath, logfile)
 
 
-        # remove old redo logs
-        removefiles(logpath, redolist)
+            # remove old redo logs
+            removefiles(logpath, redolist)
 
-        # combine compacted logfiles into as few files as possible
-        compactedlist = getfilelist(logpath, "_")
+            # combine compacted logfiles into as few files as possible
+            compactedlist = getfilelist(logpath, "_")
 
-        # combine compacted files into filled redo log files
-        combinelogs(logpath, compactedlist)
+            # combine compacted files into filled redo log files
+            combinelogs(logpath, compactedlist)
 
-        # remove old compacted log files
-        removefiles(logpath, compactedlist)
+            # remove old compacted log files
+            removefiles(logpath, compactedlist)
 
 
