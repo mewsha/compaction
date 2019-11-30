@@ -3,62 +3,82 @@ from os.path import isfile, join, stat
 import random
 import string
 from time import sleep
-import datetime
+import sys
 import math
+import datetime
+from prometheus_client import start_http_server, Gauge
+
+
+OLD_COUNT = Gauge('log_compact_old_count', "additional data")
+NUM_COMPACTIONS = Gauge('log_compact_num_compactions', "additional data")
+CURR_COUNT = Gauge('log_compact_curr_count', "additional data")
+NUM_FILES = Gauge('log_compact_num_files', "additional data")
 
 
 def logstats(stats):
-    #logs the given statistics dictionary to he compations log file
-    compactionlog = "compactions.log"
-    with open(compactionlog, "a") as compaction_log_file:
-        compaction_log_file.write(str(datetime.datetime.now()) + \
-                                  " : " + \
-                                  str(stats) + \
-                                  "\n")
+    #logs the given statistics to the compactions log file
+    OLD_COUNT.set(stats[0])
+    NUM_COMPACTIONS.set(stats[1])
+    CURR_COUNT.set(stats[2])
+    NUM_FILES.set(stats[3])
 
-def compact(oldlogfile):
-    lognum = str(oldlogfile[4]) # extract log number
-    currlogfile = "redo"+lognum+"_1.log"
+
+def compact(logpath, oldlogfile):
+    filename = logfile.strip(".log")
+    lognum = str(filename[4:])# extract log number
+    currlogfile = logpath+"redo"+lognum+"_1.log"
     stats = {}
     num_compactions, old_count, curr_count = (0,0,0) #Stats
 
-    with open(oldlogfile, 'r') as oldlogin:
+    with open(logpath+oldlogfile, 'r') as oldlogin:
         with open(currlogfile, 'w') as currlogout:
             contents = {}
             oldlogin.seek(0)
-            lines = oldlogin.readlines()
+            line = oldlogin.readlines()[0].rstrip('}').lstrip('{')
+            arr = line.split(",")
             # read key value pairs, compact and writeout
-            for l in lines:
-                arr = l.split(",")
-                (key, value) = (arr[0],arr[1])
+            #formatted {key:value,key2,key:value}
+            for a in arr:
+                p = a.split(":")
+                (key, value) = (p[0],p[1])
                 if contents.keys().__contains__(key):
                     num_compactions += 1 # Stats
                 contents[key] = value # store most recent version
                 old_count += 1 # Stats
 
             # write contents out
+            currlogout.write("{")
+            numitems = len(contents.items())
             for k,v in contents.items():
-                currlogout.write(k+","+v)
+                currlogout.write(k+":"+v)
                 curr_count += 1 # Stats
+                if curr_count != numitems:
+                    currlogout.write(",")
+            currlogout.write("}")
 
             stats[oldlogfile] = [old_count, num_compactions, curr_count]
 
-    logstats(stats) # Stats
+    # optionally log stats for each file
+    # logstats(stats) # Stats
 
 
 
-def combinelogs(redologscompacted):
+def combinelogs(logpath,redologscompacted):
     contents = {}
-    stats = {}
+    stats = []
     data = []
     num_compactions, old_count, curr_count, numfiles = (0 ,0, 0, 0)
 
     # get all key values in compacted files
     for oldlogfile in redologscompacted:
-        with open(oldlogfile, 'r') as oldlogin:
-            for l in oldlogin.readlines():
-                arr = l.split(",")
-                (key, value) = (arr[0],arr[1])
+        with open(logpath+oldlogfile, 'r') as oldlogin:
+            line = oldlogin.readlines()[0].rstrip('}').lstrip('{')
+            arr = line.split(",")
+            # read key value pairs, compact and writeout
+            #formatted {key:value,key2,key:value}
+            for a in arr:
+                p = a.split(":")
+                (key, value) = (p[0],p[1])
                 if contents.keys().__contains__(key):
                     num_compactions += 1 # Stats
                 contents[key] = value # store most recent version
@@ -66,52 +86,78 @@ def combinelogs(redologscompacted):
 
     # convert contents to data for easy partitioning
     for k,v in contents.items():
-        data.append(str(k)+","+str(v))
+        data.append(str(k)+":"+str(v))
 
     curr_count = len(data) #Stats
 
     # redistribute compacted values into logs
     # get number of files needed and place
     # 100 items into each file
-    numfiles = math.ceil(len(data) / 100) # Stats
+    print(curr_count/100.0)
+    print(math.ceil(len(data) / 100.0))
+    numfiles = int(math.ceil(len(data) / 100.0)) # Stats
+    print(numfiles)
+    print("---")
+
+    #print statistics
+    compactionlog = logpath+"compactions.log"
+    with open(compactionlog, "a") as compaction_log_file:
+        compaction_log_file.write(str(datetime.datetime.now()) + \
+                                  " : " + \
+                                  str(curr_count/100.0) + \
+                                  " : " + \
+                                  str(math.ceil(len(data) / 100.0)) + \
+                                  " : " + \
+                                  str(numfiles) + \
+                                  "\n")
+
     for filenum in range(numfiles):
-        currlogfile = "redo"+str(filenum)+".log"
+        currlogfile = logpath+"redo"+str(filenum)+".log"
         with open(currlogfile, 'w') as currlogout:
+            currlogout.write("{")
             for linenum in range(100*filenum, 100*(filenum+1)):
                 try:
                     currlogout.write(data[linenum])
+                    if(linenum != 100*(filenum+1) -1 and linenum < curr_count-1):
+                        currlogout.write(",")
                 except(IndexError):
                     pass # end of contents reached
+            currlogout.write("}")
+    stats = [old_count, num_compactions, curr_count, numfiles] # Stats
 
-    stats["multifile"] = [old_count, num_compactions, curr_count, numfiles] # Stats
-
+    # log stats for combining all log files
     logstats(stats)
 
 
-def generateredologs():
+def generateredologs(logpath):
     # generate redo logs (DEBUG)
     # should be: db writes to redo0 always
     # and rolls data back into the next available
     # redo log number, so when compaction,
-    # compact never touches redo 0,
-    # compact only works on redo 1+
-    # and compacts into redo1
+    # compact never touches last redo log,
+    # compact only works on redo 0-max-1
+    # and compacts into redo0+
     numlogs = random.randint(1,10)
     for num in range(1,numlogs):
-        with open("redo"+str(num-1)+".log", 'w') as redolog:
-            for i in range(0,99):
+        with open(logpath+"redo"+str(num-1)+".log", 'w') as redolog:
+            redolog.write("{")
+            for i in range(0,100):
                 key = random.choice(string.ascii_lowercase) + \
                       str(random.randint(0,9))
                 value = random.randint(0,1000)
-                redolog.write(key + "," + str(value)+"\n")
+
+                redolog.write(key + ":" + str(value))
+                if i != 99:
+                    redolog.write(",")
+            redolog.write("}")
 
 
-def removefiles(filelist):
+def removefiles(logpath, filelist):
     # remove old log files
     numfiles = len(filelist)
     for num in range(numfiles):
         rmfile = filelist[num]
-        remove(rmfile)
+        remove(logpath+rmfile)
 
 
 def getfilelist(logpath, namecontains):
@@ -123,28 +169,51 @@ def getfilelist(logpath, namecontains):
 
 
 if __name__=="__main__":
-    logpath = "."
+    logpath = "./etc/bananadb/"
 
-    #DEBUG: generate the redo log files
-    generateredologs()
+    # Start up the server to expose the metrics.
+    start_http_server(9101)
 
-    # get all log files
-    redolist = getfilelist(logpath, "redo")
+    if sys.argv[0] == 'test':
+        print(logpath)
+    else:
+        #while True:
+        sleep(10)
+        #DEBUG: generate the redo log files
+        generateredologs(logpath)
 
-    # compact each logfile
-    for logfile in redolist:
-        compact(logfile)
+        # get all log files
+        redolist = getfilelist(logpath, "redo")
+        print(redolist)
 
-    # remove old redo logs
-    removefiles(redolist)
+        #exclude last file from list (currently in use by database)
+        # loop through redo list
+        maxNum = 0
+        for logfile in redolist:
+            # get number at end of file, all files format "redo##.log"
+            filename = logfile.strip(".log")
+            filenum = int(filename[4:])
+            maxNum = max(filenum, maxNum)
+        # remove last file from redo list
+        excludeFile = "redo"+str(maxNum)+".log"
+        redolist.remove(excludeFile)
+        print(redolist)
 
-    # combine compacted logfiles into one file
-    compactedlist = getfilelist(logpath, "_")
+        # compact each logfile
+        for logfile in redolist:
+            compact(logpath, logfile)
 
-    # combine compacted files into filled redo log files
-    combinelogs(compactedlist)
 
-    # remove old compacted log files
-    removefiles(compactedlist)
+        # remove old redo logs
+        removefiles(logpath, redolist)
+
+        # combine compacted logfiles into as few files as possible
+        compactedlist = getfilelist(logpath, "_")
+
+        # combine compacted files into filled redo log files
+        combinelogs(logpath, compactedlist)
+
+        # remove old compacted log files
+        removefiles(logpath, compactedlist)
 
 
