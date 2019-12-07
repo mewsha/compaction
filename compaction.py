@@ -24,7 +24,7 @@ def logstats(stats):
 
 
 def compact(logpath, oldlogfile):
-    filename = logfile.strip(".log")
+    filename = oldlogfile.strip(".log")
     lognum = str(filename[4:])# extract log number
     currlogfile = logpath+"redo"+lognum+"_1.log"
     stats = {}
@@ -34,17 +34,21 @@ def compact(logpath, oldlogfile):
         with open(currlogfile, 'w') as currlogout:
             contents = {}
             oldlogin.seek(0)
-            line = oldlogin.readlines()[0].rstrip('}').lstrip('{')
+            line = oldlogin.readlines()[0].rstrip(',').lstrip('{')
             arr = line.split(",")
+            print(arr)
             # read key value pairs, compact and writeout
             #formatted {key:value,key2,key:value}
             for a in arr:
                 p = a.split(":")
-                (key, value) = (p[0],p[1])
-                if contents.keys().__contains__(key):
-                    num_compactions += 1 # Stats
-                contents[key] = value # store most recent version
-                old_count += 1 # Stats
+                try:
+                    (key, value) = (p[0],p[1])
+                    if contents.keys().__contains__(key):
+                        num_compactions += 1 # Stats
+                    contents[key] = value # store most recent version
+                    old_count += 1 # Stats
+                except IndexError as e:
+                    pass
 
             # write contents out
             currlogout.write("{")
@@ -52,9 +56,7 @@ def compact(logpath, oldlogfile):
             for k,v in contents.items():
                 currlogout.write(k+":"+v)
                 curr_count += 1 # Stats
-                if curr_count != numitems:
-                    currlogout.write(",")
-            currlogout.write("}")
+                currlogout.write(",")
 
             stats[oldlogfile] = [old_count, num_compactions, curr_count]
 
@@ -72,17 +74,20 @@ def combinelogs(logpath,redologscompacted):
     # get all key values in compacted files
     for oldlogfile in redologscompacted:
         with open(logpath+oldlogfile, 'r') as oldlogin:
-            line = oldlogin.readlines()[0].rstrip('}').lstrip('{')
+            line = oldlogin.readlines()[0].rstrip(',').lstrip('{')
             arr = line.split(",")
             # read key value pairs, compact and writeout
             #formatted {key:value,key2,key:value}
             for a in arr:
                 p = a.split(":")
-                (key, value) = (p[0],p[1])
-                if contents.keys().__contains__(key):
-                    num_compactions += 1 # Stats
-                contents[key] = value # store most recent version
-                old_count += 1 # Stats
+                try:
+                    (key, value) = (p[0],p[1])
+                    if contents.keys().__contains__(key):
+                        num_compactions += 1 # Stats
+                    contents[key] = value # store most recent version
+                    old_count += 1 # Stats
+                except IndexError as e:
+                    pass
 
     # convert contents to data for easy partitioning
     for k,v in contents.items():
@@ -118,11 +123,9 @@ def combinelogs(logpath,redologscompacted):
             for linenum in range(100*filenum, 100*(filenum+1)):
                 try:
                     currlogout.write(data[linenum])
-                    if(linenum != 100*(filenum+1) -1 and linenum < curr_count-1):
-                        currlogout.write(",")
+                    currlogout.write(",")
                 except(IndexError):
                     pass # end of contents reached
-            currlogout.write("}")
     stats = [old_count, num_compactions, curr_count, numfiles] # Stats
 
     # log stats for combining all log files
@@ -145,9 +148,7 @@ def generateredologs(logpath):
                 value = random.randint(0,1000)
 
                 redolog.write(key + ":" + str(value))
-                if i != 99:
-                    redolog.write(",")
-            redolog.write("}")
+                redolog.write(",")
 
 
 def removefiles(logpath, filelist):
@@ -176,7 +177,7 @@ if __name__=="__main__":
         print(logpath)
     else:
         while True:
-            sleep(10)
+            sleep(60)
             #DEBUG: generate the redo log files
             #generateredologs(logpath)
 
