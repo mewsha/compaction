@@ -47,7 +47,7 @@ def compact(logpath, oldlogfile):
                         num_compactions += 1 # Stats
                     contents[key] = value # store most recent version
                     old_count += 1 # Stats
-                except IndexError as e:
+                except(IndexError, Exception) as e:
                     pass
 
             # write contents out
@@ -86,7 +86,7 @@ def combinelogs(logpath,redologscompacted):
                         num_compactions += 1 # Stats
                     contents[key] = value # store most recent version
                     old_count += 1 # Stats
-                except IndexError as e:
+                except(IndexError, Exception) as e:
                     pass
 
     # convert contents to data for easy partitioning
@@ -177,7 +177,7 @@ if __name__=="__main__":
         print(logpath)
     else:
         while True:
-            sleep(60)
+            sleep(30)
             #DEBUG: generate the redo log files
             #generateredologs(logpath)
 
@@ -195,7 +195,10 @@ if __name__=="__main__":
                 maxNum = max(filenum, maxNum)
             # remove last file from redo list
             excludeFile = "redo"+str(maxNum)+".log"
-            redolist.remove(excludeFile)
+            try:
+                redolist.remove(excludeFile)
+            except(ValueError, Exception) as e:
+                print("couldn't remove file:", excludeFile)
             print(redolist)
 
             # compact each logfile
@@ -213,6 +216,9 @@ if __name__=="__main__":
             combinelogs(logpath, compactedlist)
 
             # remove old compacted log files
-            removefiles(logpath, compactedlist)
+            try:
+                removefiles(logpath, compactedlist)
+            except(ValueError, Exception) as e:
+                print("Couldn't remove ", compactedlist)
 
 
